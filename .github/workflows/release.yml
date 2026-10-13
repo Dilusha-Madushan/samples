@@ -1,0 +1,157 @@
+# Entrypoint workflow for releasing sample apps.
+# Each selected sample is released independently: its version is bumped in its
+# native manifest (package.json, pubspec.yaml, ...), committed, tagged, packed
+# into a source zip and attached to a GitHub Release.
+# Sample jobs run concurrently; push conflicts are handled by a retry-with-rebase
+# loop in the commit step.
+
+name: 🚀 Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump_type:
+        description: 'Version bump type'
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+        default: patch
+
+      confirm_major:
+        description: 'Check to confirm intentional major bump (required when bump_type is major)'
+        required: false
+        type: boolean
+        default: false
+
+      sample_flutter_app_auth:
+        description: 'integrations/flutter-app-auth'
+        required: false
+        type: boolean
+        default: false
+
+      sample_self_care_account:
+        description: 'self-care/account'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+env:
+  RELEASE_GIT_USER_NAME: "thunderid[bot]"
+  RELEASE_GIT_USER_EMAIL: "thunderid[bot]@users.noreply.thunderid.dev"
+
+jobs:
+  validate:
+    name: ✅ Validate Inputs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Guard against accidental major bump
+        if: github.event.inputs.bump_type == 'major' && github.event.inputs.confirm_major != 'true'
+        run: |
+          echo "❌ bump_type is 'major' but confirm_major is not checked. Enable confirm_major to proceed."
+          exit 1
+
+  # ── Integrations ───────────────────────────────────────────────────────────
+  release-flutter-app-auth:
+    name: 🦋 Release integrations/flutter-app-auth
+    needs: [validate]
+    if: needs.validate.result == 'success' && github.event.inputs.sample_flutter_app_auth == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          token: ${{ secrets.THUNDERID_AUTOMATION_BOT }}
+
+      - name: 🏷️ Bump Version
+        id: bump
+        uses: ./.github/actions/bump-version
+        with:
+          path: integrations/flutter-app-auth
+          bump_type: ${{ github.event.inputs.bump_type }}
+
+      - name: 📤 Commit, Tag & Push
+        run: |
+          git config user.name "${{ env.RELEASE_GIT_USER_NAME }}"
+          git config user.email "${{ env.RELEASE_GIT_USER_EMAIL }}"
+          git add "${{ steps.bump.outputs.manifest }}"
+          git diff --cached --quiet || git commit -m "[Release] integrations/flutter-app-auth@${{ steps.bump.outputs.version }}"
+          for i in $(seq 1 5); do
+            git pull --rebase origin ${{ github.ref_name }}
+            git push origin HEAD:${{ github.ref_name }} && break
+            [ "$i" -eq 5 ] && exit 1
+            sleep $((i * 3))
+          done
+          git tag "sample/integrations/flutter-app-auth/v${{ steps.bump.outputs.version }}"
+          git push origin "sample/integrations/flutter-app-auth/v${{ steps.bump.outputs.version }}"
+
+      - name: 📦 Pack Sample
+        id: pack
+        uses: ./.github/actions/pack-sample
+        with:
+          path: integrations/flutter-app-auth
+          version: ${{ steps.bump.outputs.version }}
+
+      - name: 🚀 Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.THUNDERID_AUTOMATION_BOT }}
+        run: |
+          gh release create "sample/integrations/flutter-app-auth/v${{ steps.bump.outputs.version }}" \
+            --title "ThunderID Flutter AppAuth Sample v${{ steps.bump.outputs.version }}" \
+            --generate-notes \
+            "${{ steps.pack.outputs.archive }}"
+
+  # ── Self-Care ──────────────────────────────────────────────────────────────
+  release-self-care-account:
+    name: 👤 Release self-care/account
+    needs: [validate]
+    if: needs.validate.result == 'success' && github.event.inputs.sample_self_care_account == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          token: ${{ secrets.THUNDERID_AUTOMATION_BOT }}
+
+      - name: 🏷️ Bump Version
+        id: bump
+        uses: ./.github/actions/bump-version
+        with:
+          path: self-care/account
+          bump_type: ${{ github.event.inputs.bump_type }}
+
+      - name: 📤 Commit, Tag & Push
+        run: |
+          git config user.name "${{ env.RELEASE_GIT_USER_NAME }}"
+          git config user.email "${{ env.RELEASE_GIT_USER_EMAIL }}"
+          git add "${{ steps.bump.outputs.manifest }}"
+          git diff --cached --quiet || git commit -m "[Release] self-care/account@${{ steps.bump.outputs.version }}"
+          for i in $(seq 1 5); do
+            git pull --rebase origin ${{ github.ref_name }}
+            git push origin HEAD:${{ github.ref_name }} && break
+            [ "$i" -eq 5 ] && exit 1
+            sleep $((i * 3))
+          done
+          git tag "sample/self-care/account/v${{ steps.bump.outputs.version }}"
+          git push origin "sample/self-care/account/v${{ steps.bump.outputs.version }}"
+
+      - name: 📦 Pack Sample
+        id: pack
+        uses: ./.github/actions/pack-sample
+        with:
+          path: self-care/account
+          version: ${{ steps.bump.outputs.version }}
+
+      - name: 🚀 Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.THUNDERID_AUTOMATION_BOT }}
+        run: |
+          gh release create "sample/self-care/account/v${{ steps.bump.outputs.version }}" \
+            --title "ThunderID Self-Care Account Sample v${{ steps.bump.outputs.version }}" \
+            --generate-notes \
+            "${{ steps.pack.outputs.archive }}"
