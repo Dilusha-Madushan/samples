@@ -48,12 +48,12 @@ jobs:
       - name: 📥 Checkout Code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      # Every samples/<category>/<sample>/ directory with a package.json is a sample.
+      # Every <category>/<sample>/ directory at the repo root with a package.json is a sample.
       - name: 🔍 Find Samples
         id: find
         run: |
-          samples=$(find samples -mindepth 3 -maxdepth 3 -name package.json -not -path "*/node_modules/*" \
-            -exec dirname {} \; 2>/dev/null | sort | jq -R . | jq -cs .)
+          samples=$(find . -mindepth 3 -maxdepth 3 -name package.json -not -path "./.*" -not -path "*/node_modules/*" \
+            -exec dirname {} \; 2>/dev/null | sed 's#^\./##' | sort | jq -R . | jq -cs .)
           echo "samples=$samples" >> "$GITHUB_OUTPUT"
           echo "Samples: $samples"
 

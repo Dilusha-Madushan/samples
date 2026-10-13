@@ -1,0 +1,82 @@
+name: Bump Sample Version
+description: >
+  Bumps the version of a sample app in its native version manifest, so samples
+  built on different stacks can share one release flow. Supported manifests
+  (checked in order): package.json (npm/pnpm/yarn) and pubspec.yaml (Flutter/Dart).
+
+inputs:
+  path:
+    description: Sample app directory, relative to the repo root (e.g. self-care/account)
+    required: true
+  bump_type:
+    description: Version bump type (patch, minor or major)
+    required: true
+
+outputs:
+  version:
+    description: The new semantic version (e.g. 1.2.3), without any build metadata
+    value: ${{ steps.bump.outputs.version }}
+  manifest:
+    description: Path of the updated manifest file (relative to the workspace root), for staging
+    value: ${{ steps.bump.outputs.manifest }}
+
+runs:
+  using: composite
+  steps:
+    - name: Bump
+      id: bump
+      shell: bash
+      run: |
+        SAMPLE_PATH="${{ inputs.path }}"
+        BUMP_TYPE="${{ inputs.bump_type }}"
+
+        case "${BUMP_TYPE}" in
+          patch|minor|major) ;;
+          *)
+            echo "Error: unsupported bump_type '${BUMP_TYPE}' (expected patch, minor or major)"
+            exit 1
+            ;;
+        esac
+
+        # Bumps a plain X.Y.Z version string according to BUMP_TYPE.
+        bump_semver() {
+          local MAJOR MINOR PATCH
+          IFS=. read -r MAJOR MINOR PATCH <<< "$1"
+          case "${BUMP_TYPE}" in
+            major) echo "$((MAJOR + 1)).0.0" ;;
+            minor) echo "${MAJOR}.$((MINOR + 1)).0" ;;
+            patch) echo "${MAJOR}.${MINOR}.$((PATCH + 1))" ;;
+          esac
+        }
+
+        if [ -f "${SAMPLE_PATH}/package.json" ]; then
+          MANIFEST="${SAMPLE_PATH}/package.json"
+          (cd "${SAMPLE_PATH}" && npm version "${BUMP_TYPE}" --no-git-tag-version --ignore-scripts > /dev/null)
+          VERSION=$(node -p "require('./${MANIFEST}').version")
+
+        elif [ -f "${SAMPLE_PATH}/pubspec.yaml" ]; then
+          MANIFEST="${SAMPLE_PATH}/pubspec.yaml"
+          CURRENT=$(sed -n -E 's/^version:[[:space:]]*([^[:space:]#]+).*/\1/p' "${MANIFEST}" | head -1)
+          if [ -z "${CURRENT}" ]; then
+            echo "Error: no 'version:' field found in ${MANIFEST}"
+            exit 1
+          fi
+
+          VERSION=$(bump_semver "${CURRENT%%+*}")
+          # Flutter maps the +N build number to Android versionCode / iOS CFBundleVersion,
+          # which must increase monotonically, so always increment it alongside the version.
+          if [[ "${CURRENT}" == *+* ]]; then
+            BUILD=$(( ${CURRENT#*+} + 1 ))
+          else
+            BUILD=1
+          fi
+          sed -i -E "s/^version:[[:space:]]*[^[:space:]#]+/version: ${VERSION}+${BUILD}/" "${MANIFEST}"
+
+        else
+          echo "Error: no supported version manifest (package.json, pubspec.yaml) found in ${SAMPLE_PATH}"
+          exit 1
+        fi
+
+        echo "Bumped ${SAMPLE_PATH} to ${VERSION} (${MANIFEST})"
+        echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+        echo "manifest=${MANIFEST}" >> "$GITHUB_OUTPUT"

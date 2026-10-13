@@ -1,0 +1,43 @@
+name: Pack Sample App
+description: >
+  Packages a sample app into a standalone source zip using git archive. Only
+  committed files are included (no node_modules, build output or .env files),
+  so it works for any stack. Run it after the release commit so the zip carries
+  the bumped version. Exclude extra files with `export-ignore` in .gitattributes.
+
+inputs:
+  path:
+    description: Sample app directory, relative to the repo root (e.g. self-care/account)
+    required: true
+  version:
+    description: Version being released (e.g. 1.2.3), used to name the zip file
+    required: true
+
+outputs:
+  archive:
+    description: Filename of the produced zip (relative to the workspace root)
+    value: ${{ steps.pack.outputs.archive }}
+
+runs:
+  using: composite
+  steps:
+    - name: Pack
+      id: pack
+      shell: bash
+      run: |
+        SAMPLE_PATH="${{ inputs.path }}"
+        VERSION="${{ inputs.version }}"
+        SAMPLE_PATH="${SAMPLE_PATH%/}"
+        # self-care/account -> self-care-account
+        SLUG=$(echo "${SAMPLE_PATH}" | tr '/' '-')
+        FOLDER="thunderid-${SLUG}-sample-v${VERSION}"
+        ARCHIVE="${FOLDER}.zip"
+
+        if ! git cat-file -e "HEAD:${SAMPLE_PATH}" 2>/dev/null; then
+          echo "Error: ${SAMPLE_PATH} does not exist at HEAD"
+          exit 1
+        fi
+
+        git archive --format=zip --prefix="${FOLDER}/" -o "${ARCHIVE}" "HEAD:${SAMPLE_PATH}"
+
+        echo "archive=${ARCHIVE}" >> "$GITHUB_OUTPUT"
